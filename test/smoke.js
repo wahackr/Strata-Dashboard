@@ -6,7 +6,7 @@ const path = require("node:path");
 
 /* ---- minimal DOM stub ---- */
 class El {
-  constructor(id) { this.id = id; this.children = []; this.dataset = {}; this.style = {}; this.hidden = false; this._html = ""; this._text = ""; this.onclick = null; this.oninput = null; this.value = ""; }
+  constructor(id) { this.id = id; this.children = []; this.dataset = {}; this.style = {}; this.hidden = false; this._html = ""; this._text = ""; this.onclick = null; this.oninput = null; this.onkeydown = null; this.value = ""; }
   set innerHTML(v) { this._html = v; }
   get innerHTML() { return this._html; }
   set textContent(v) { this._text = String(v); }
@@ -26,11 +26,13 @@ global.document = {
   querySelectorAll: () => [],
   documentElement: { dataset: {}, style: {} },
 };
-global.window = { strata: { platform: "linux", getState: async () => ({ settings: {}, payload: null }), setSetting: async () => { }, refresh: async () => { }, minimize() { }, close() { }, resetSize() { }, settingsHeight() { }, onMetrics() { }, onSettings() { }, onOpenSettings() { } } };
+// Captured at load time: renderer.js registers its settings listener during boot.
+let broadcast = null;
+global.window = { strata: { platform: "linux", getState: async () => ({ settings: {}, payload: null }), setSetting: async () => { }, refresh: async () => { }, minimize() { }, close() { }, resetSize() { }, settingsHeight() { }, onMetrics() { }, onSettings: (cb) => { broadcast = cb; }, onOpenSettings() { } } };
 
 /* ---- load renderer.js ---- */
 const src = fs.readFileSync(path.join(__dirname, "..", "renderer", "renderer.js"), "utf8");
-const run = new Function("window", "document", src + "\nreturn { render, renderFailure, renderConnected };");
+const run = new Function("window", "document", src + "\nreturn { render, renderFailure, renderConnected, connectNow };");
 const api = run(global.window, global.document);
 
 /* ---- 1. live server (optional: LAN-only, skipped in CI) ---- */
@@ -72,4 +74,37 @@ const api = run(global.window, global.document);
   /* ---- 4. empty metrics ---- */
   api.render({ live: { state: "idle" }, hardware: {}, hardware_static: {}, engine: {}, history: {}, requests: [] });
   console.log("empty metrics OK");
+
+  /* ---- 5. context-fill ring tracks usage ---- */
+  // r=40 -> circumference 251.3; half of a 131072-token context = 125.65.
+  api.render({
+    live: { state: "generating", prompt_tokens: 65536, generated: 0 },
+    hardware: {}, hardware_static: {}, engine: { max_context: 131072 }, history: {}, requests: [],
+  });
+  console.assert($("ctx-fill").style.strokeDasharray === "125.7 251.3", `ctx dasharray: ${$("ctx-fill").style.strokeDasharray}`);
+  console.assert($("ctx-pct").textContent === "50%", `ctx pct: ${$("ctx-pct").textContent}`);
+  if ($("ctx-fill").style.strokeDasharray !== "125.7 251.3" || $("ctx-pct").textContent !== "50%") {
+    throw new Error(`context fill ring wrong: dasharray=${$("ctx-fill").style.strokeDasharray} pct=${$("ctx-pct").textContent}`);
+  }
+  console.log("context fill ring OK");
+
+  /* ---- 6. Connect must survive the settings broadcast ---- */
+  // Regression: main broadcasts the saved settings after every setSetting, so
+  // the renderer's `settings` object is replaced mid-connect with apiKey ""
+  // (the key isn't stored yet). connectNow must read the fields from the DOM,
+  // never from `settings`, or the typed key is silently wiped before saving.
+  const saved = {};
+  global.window.strata.setSetting = async (k, v) => {
+    saved[k] = v;
+    // Mirror main.js setSetting: save, then broadcast the whole settings object.
+    if (broadcast) broadcast({ baseUrl: saved.baseUrl || "", apiKey: k === "apiKey" ? v : "" });
+  };
+  global.window.strata.refresh = async () => ({ ok: true, status: 200, metrics: {}, health: {} });
+  $("set-url").value = "http://example.test:8080";
+  $("set-key").value = "dummy-key";
+  await api.connectNow();
+  if (saved.apiKey !== "dummy-key") {
+    throw new Error(`connect wiped the key: saved.apiKey=${JSON.stringify(saved.apiKey)}`);
+  }
+  console.log("connect keeps typed key through broadcast OK");
 })().catch((e) => { console.error("SMOKE FAILED:", e.message); process.exit(1); });

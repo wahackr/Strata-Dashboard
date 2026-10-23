@@ -168,7 +168,9 @@ function render(m) {
   if (live.state !== "idle") used = (live.prompt_tokens || 0) + (live.generated || 0);
   else if (last) used = (last.prompt_tokens || 0) + (last.output_tokens || 0);
   const frac = ctx ? Math.min(1, used / ctx) : 0;
-  $("ctx-fill").setAttribute("stroke-dasharray", `${(251.3 * frac).toFixed(1)} 251.3`);
+  // inline style, not setAttribute: the .donut__fill CSS rule would override a
+  // presentation attribute and the ring would never fill.
+  $("ctx-fill").style.strokeDasharray = `${(251.3 * frac).toFixed(1)} 251.3`;
   $("ctx-fill").style.opacity = 251.3 * frac >= 3 ? "1" : "0";
   $("ctx-pct").textContent = `${Math.round(frac * 100)}%`;
   $("ctx-sub").textContent = ctx ? `${kfmt(used)} / ${ctxfmt(ctx)}` : "–";
@@ -261,7 +263,10 @@ $("btn-min").onclick = () => window.strata.minimize();
 $("btn-close").onclick = () => window.strata.close();
 function toggleSettings(open) {
   $("settings").hidden = !open;
-  if (open) fillSettings();
+  if (open) {
+    fillSettings();
+    $("set-status").hidden = true;
+  }
   if (settings.compact) window.strata.settingsHeight(open);
 }
 $("btn-settings").onclick = () => toggleSettings($("settings").hidden);
@@ -278,15 +283,72 @@ $("set-poll").oninput = () => {
   window.strata.setSetting("pollMs", v);
 };
 $("set-reset").onclick = () => window.strata.resetSize();
+
+// Connect: save server/key, poll once immediately, and report the result inline.
+// Keeps the overlay open on failure so the fields can be fixed in place.
+async function connectNow() {
+  const status = $("set-status");
+  status.hidden = false;
+  // Capture the fields in locals BEFORE any await: setSetting broadcasts the
+  // saved settings back to this renderer, which replaces the `settings` object
+  // mid-await and would wipe a typed key to "" before it ever gets stored.
+  const url = $("set-url").value.trim();
+  const key = $("set-key").value.trim();
+  settings.baseUrl = url;
+  settings.apiKey = key;
+  if (!url) {
+    status.dataset.state = "bad";
+    status.textContent = "Enter the server URL first";
+    return;
+  }
+  if (!key) {
+    status.dataset.state = "bad";
+    status.textContent = "Enter the API key first";
+    return;
+  }
+  status.dataset.state = "pending";
+  status.textContent = "Connecting\u2026";
+  await window.strata.setSetting("baseUrl", url);
+  await window.strata.setSetting("apiKey", key);
+  const p = await window.strata.refresh();
+  if (p?.ok) {
+    status.dataset.state = "ok";
+    status.textContent = "Connected";
+    toggleSettings(false);
+  } else {
+    status.dataset.state = "bad";
+    status.textContent = p?.status === 401
+      ? `API key rejected (401)${p.auth ? "" : " \u2014 no key was sent"}`
+      : `Not reachable: ${p?.error || `HTTP ${p?.status}`}`;
+  }
+}
+$("set-connect").onclick = () => connectNow();
+// Editing either field invalidates the previous attempt's status line.
+$("set-url").oninput = () => { $("set-status").hidden = true; };
+$("set-key").oninput = () => { $("set-status").hidden = true; };
+$("set-url").onkeydown = (e) => { if (e.key === "Enter") connectNow(); };
+$("set-key").onkeydown = (e) => { if (e.key === "Enter") connectNow(); };
+$("set-key-reveal").onclick = () => {
+  const inp = $("set-key");
+  const shown = inp.type === "text";
+  inp.type = shown ? "password" : "text";
+  $("set-key-reveal").textContent = shown ? "Show" : "Hide";
+  $("set-key-reveal").title = shown ? "Show" : "Hide";
+};
 $("set-save").onclick = async () => {
-  settings.baseUrl = $("set-url").value.trim();
-  settings.apiKey = $("set-key").value.trim();
-  settings.opacity = Number($("set-opacity").value);
-  settings.pollMs = Number($("set-poll").value);
-  await window.strata.setSetting("baseUrl", settings.baseUrl);
-  await window.strata.setSetting("apiKey", settings.apiKey);
-  await window.strata.setSetting("opacity", settings.opacity);
-  await window.strata.setSetting("pollMs", settings.pollMs);
+  // Same broadcast trap as connectNow: read every field into locals first.
+  const url = $("set-url").value.trim();
+  const key = $("set-key").value.trim();
+  const opacity = Number($("set-opacity").value);
+  const pollMs = Number($("set-poll").value);
+  settings.baseUrl = url;
+  settings.apiKey = key;
+  settings.opacity = opacity;
+  settings.pollMs = pollMs;
+  await window.strata.setSetting("baseUrl", url);
+  await window.strata.setSetting("apiKey", key);
+  await window.strata.setSetting("opacity", opacity);
+  await window.strata.setSetting("pollMs", pollMs);
   toggleSettings(false);
   window.strata.refresh();
 };

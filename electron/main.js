@@ -21,8 +21,16 @@ function loadSettings() {
   try {
     const raw = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
     const s = { ...DEFAULTS, ...raw };
-    if (raw.apiKeyEnc && safeStorage.isEncryptionAvailable()) {
-      try { s.apiKey = safeStorage.decryptString(Buffer.from(raw.apiKeyEnc, "base64")); } catch { }
+    delete s.apiKeyEnc; // storage-only, never a runtime setting
+    // A key typed into Settings (plaintext) always wins over a stale encrypted
+    // one, so a leftover apiKeyEnc can never silently override what the user
+    // just entered.
+    if (raw.apiKey) {
+      s.apiKey = raw.apiKey;
+    } else if (raw.apiKeyEnc && safeStorage.isEncryptionAvailable()) {
+      try { s.apiKey = safeStorage.decryptString(Buffer.from(raw.apiKeyEnc, "base64")); } catch { s.apiKey = ""; }
+    } else {
+      s.apiKey = "";
     }
     return s;
   } catch {
@@ -32,9 +40,19 @@ function loadSettings() {
 
 function saveSettings(s) {
   const out = { ...s };
-  if (safeStorage.isEncryptionAvailable() && out.apiKey) {
-    out.apiKeyEnc = safeStorage.encryptString(out.apiKey).toString("base64");
-    delete out.apiKey;
+  delete out.apiKeyEnc; // keep apiKey / apiKeyEnc mutually exclusive
+  const key = out.apiKey || "";
+  if (!key) {
+    out.apiKey = "";
+  } else {
+    // Prefer OS-level encryption, but never let a failing encryptString abort
+    // the whole write (that would silently drop the key the user just typed).
+    let enc = null;
+    try {
+      if (safeStorage.isEncryptionAvailable()) enc = safeStorage.encryptString(key).toString("base64");
+    } catch { enc = null; }
+    if (enc) out.apiKeyEnc = enc;
+    else out.apiKey = key;
   }
   try { fs.writeFileSync(settingsFile(), JSON.stringify(out, null, 2)); } catch { }
 }
@@ -71,7 +89,11 @@ async function request(pathname, { timeout = 4000 } = {}) {
     const headers = {};
     if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
     const r = await fetch(`${base}/${pathname}`, { headers, signal: ctrl.signal });
-    if (r.status === 401) return { status: 401 };
+    if (r.status === 401) {
+      // Terminal evidence of what the widget actually sent, without leaking the key.
+      console.log(`[strata] GET ${base}/${pathname} -> 401 (Authorization ${settings.apiKey ? "sent" : "missing"})`);
+      return { status: 401 };
+    }
     if (!r.ok) return { status: r.status };
     return { status: r.status, body: await r.json() };
   } catch (e) {
@@ -87,7 +109,7 @@ async function pollOnce() {
     const h = await request("health", { timeout: 6000 });
     lastPayload = { ok: true, status: 200, metrics: m.body, health: h.status === 200 ? h.body : null };
   } else {
-    lastPayload = { ok: false, status: m.status, error: m.error || `HTTP ${m.status}`, metrics: null };
+    lastPayload = { ok: false, status: m.status, error: m.error || `HTTP ${m.status}`, metrics: null, auth: Boolean(settings.apiKey) };
   }
   if (win && !win.isDestroyed()) win.webContents.send("metrics", lastPayload);
   updateTrayState();
