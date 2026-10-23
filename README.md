@@ -4,6 +4,19 @@ A compact, always-on-top desktop widget for the [Strata](https://github.com/Niko
 inference server monitor — the same Monitor view as the web dashboard, in a small
 frameless window that floats above everything.
 
+## Screenshots
+
+Monitor view, light and dark:
+
+| ![Monitor — light theme](docs/screenshots/widget-light.png) | ![Monitor — dark theme](docs/screenshots/widget-dark.png) |
+|---|---|
+
+Compact mode — the window shrinks to a tab-bar-sized strip (560×44) showing state,
+model, speed, GPU load, and context fill:
+
+| ![Compact strip — light](docs/screenshots/mini-light.png) | ![Compact strip — dark](docs/screenshots/mini-dark.png) |
+|---|---|
+
 ## Features
 
 - **Live metrics** — polls `GET /metrics` (Bearer auth) every second, in the main
