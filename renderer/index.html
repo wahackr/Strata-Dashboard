@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>Strata Widget</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="widget">
+
+  <header class="bar" id="drag-bar">
+    <span class="bar__brand">
+      <span class="dot" id="dot" data-state="idle"></span>
+      <span id="brand-text">Strata</span>
+    </span>
+    <span class="bar__model" id="model-name" title="model">–</span>
+    <span class="strip" id="strip" hidden>
+      <span class="dot" id="strip-dot" data-state="idle"></span>
+      <b id="strip-state">Idle</b>
+      <span class="strip__model" id="strip-model">–</span>
+      <span class="strip__kv"><b id="strip-speed">–</b><small>t/s</small></span>
+      <span class="strip__kv"><b id="strip-gpu">–</b><small>% gpu</small></span>
+      <span class="strip__kv"><b id="strip-ctx">–</b><small>% ctx</small></span>
+    </span>
+    <span class="bar__spacer"></span>
+    <button class="ibtn" id="btn-pin" title="Always on top (compat mode)">
+      <svg viewBox="0 0 24 24"><path d="M16 3l5 5-4 1-3 3-1 5-4-4-4 4 4-4-1-5 3-3-1-5z"/></svg>
+    </button>
+    <button class="ibtn" id="btn-compact" title="Compact mode (tab bar)">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg>
+    </button>
+    <button class="ibtn" id="btn-theme" title="Toggle dark / light">
+      <svg viewBox="0 0 24 24" id="theme-icon"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+    <button class="ibtn" id="btn-settings" title="Settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 3.4l.1 1a1 1 0 0 1-1 1h-1a1.7 1.7 0 0 1-1.6-1 1.7 1.7 0 0 0-2.5-.6 1.7 1.7 0 0 0-1 2.5 1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1l.1-1a1.7 1.7 0 0 0-.6-1.5 1.7 1.7 0 0 0-3.4-.3l-1 .1a1 1 0 0 1-1-1v-1a1.7 1.7 0 0 1 1-1.6 1.7 1.7 0 0 0 .6-2.5 1.7 1.7 0 0 0-2.5-1l-1 .1a1 1 0 0 1-1-1v-1a1 1 0 0 1 1-1l1 .1a1.7 1.7 0 0 0 1.5-.6 1.7 1.7 0 0 0 .6-3.4l-.1-1a1 1 0 0 1 1-1h1a1.7 1.7 0 0 1 1.6 1 1.7 1.7 0 0 0 2.5.6 1.7 1.7 0 0 0 1-2.5 1 1 0 0 1 1-1h1a1 1 0 0 1 1 1l-.1 1a1.7 1.7 0 0 0-.6 1.5 1.7 1.7 0 0 0 3.4.3l1-.1a1 1 0 0 1 1 1v1a1.7 1.7 0 0 1-1 1.6z"/></svg>
+    </button>
+    <button class="ibtn" id="btn-min" title="Minimize">
+      <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+    </button>
+    <button class="ibtn ibtn--close" id="btn-close" title="Quit">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab on" id="tab-btn-monitor">Monitor</button>
+    <button class="tab" id="tab-btn-requests">Requests</button>
+  </nav>
+
+  <div class="tab-page" id="tab-monitor">
+  <section class="card state-card">
+    <div class="state-card__top">
+      <span class="state-card__label">Model state</span>
+      <span class="badges" id="state-badges">
+        <span class="badge" data-s="idle"><i></i>Idle</span>
+        <span class="badge" data-s="reading"><i></i>Reading</span>
+        <span class="badge" data-s="generating"><i></i>Generating</span>
+        <span class="badge" data-s="queued"><i></i>Queued</span>
+        <span class="badge" data-s="error"><i></i>Error</span>
+      </span>
+    </div>
+    <div class="state-card__row">
+      <span id="state-label">Waiting for a request</span>
+      <span class="muted" id="state-detail"></span>
+    </div>
+    <div class="progress"><div class="progress__bar" id="state-bar"></div></div>
+  </section>
+
+  <section class="grid" id="cards"></section>
+
+  <section class="card ctx-card">
+    <div class="ctx-card__head">Context fill</div>
+    <div class="ctx-card__body">
+      <div class="donut">
+        <svg viewBox="0 0 100 100">
+          <circle class="donut__bg" cx="50" cy="50" r="40"/>
+          <circle class="donut__fill" id="ctx-fill" cx="50" cy="50" r="40"/>
+        </svg>
+        <div class="donut__text"><b id="ctx-pct">0%</b><span id="ctx-sub">–</span></div>
+      </div>
+      <div class="ctx-bars">
+        <div class="mini"><span class="mini__label">Expert cache</span><span class="mini__value" id="slots-text">–</span>
+          <div class="progress"><div class="progress__bar" id="slots-bar"></div></div></div>
+        <div class="mini"><span class="mini__label">System RAM</span><span class="mini__value" id="ram-text">–</span>
+          <div class="progress"><div class="progress__bar" id="ram-bar"></div></div></div>
+        <div class="mini"><span class="mini__label">GPU temp</span><span class="mini__value" id="temp-text">–</span>
+          <div class="progress"><div class="progress__bar" id="temp-bar"></div></div></div>
+      </div>
+    </div>
+  </section>
+  </div>
+
+  <div class="tab-page" id="tab-requests" hidden>
+  <section class="card req-card">
+    <div class="req-card__head">
+      <span>Recent requests</span>
+      <span class="muted" id="req-count"></span>
+    </div>
+    <table class="req">
+      <thead><tr><th>Time</th><th>Status</th><th>Prompt</th><th>Reused</th><th>Output</th><th>t/s</th></tr></thead>
+      <tbody id="req-body"><tr><td colspan="6" class="muted">Connecting…</td></tr></tbody>
+    </table>
+  </section>
+  </div>
+
+  <div class="settings" id="settings" hidden>
+    <div class="settings__title">Settings</div>
+    <label>Server<input id="set-url" type="text" placeholder="http://127.0.0.1:8080" spellcheck="false"></label>
+    <label>API key<input id="set-key" type="password" placeholder="Bearer key" spellcheck="false"></label>
+    <label>Opacity<span class="range-row"><input id="set-opacity" type="range" min="0.5" max="1" step="0.05"><span id="opacity-val">100%</span></span></label>
+    <label>Poll interval<span class="range-row"><input id="set-poll" type="range" min="500" max="5000" step="250"><span id="poll-val">1.0 s</span></span></label>
+    <div class="settings__actions">
+      <button class="btn" id="set-save">Save</button>
+      <button class="btn btn--ghost" id="set-reset">Reset size</button>
+      <button class="btn btn--ghost" id="set-close">Close</button>
+    </div>
+    <div class="settings__hint">Sliders apply instantly. Server/key need Save. Compact = tab bar (state · speed · GPU · ctx). Compat mode = pin (📌). Theme = moon/sun. Drag the bar to move.</div>
+  </div>
+
+</div>
+<script src="renderer.js"></script>
+</body>
+</html>

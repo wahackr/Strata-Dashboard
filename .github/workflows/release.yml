@@ -1,0 +1,232 @@
+name: Release
+
+# Publishes installers for Linux and Windows. The git tag is the release version:
+# pushing v<version> publishes <version>. A manual run takes the version from the
+# workflow inputs, falling back to package.json.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 1.0.0 or 1.0.0-rc.1 (defaults to package.json)'
+        required: false
+        type: string
+        default: ''
+      force:
+        description: 'Replace assets when a release for that version already exists'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  prepare:
+    name: Test and resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Resolve release version
+        id: resolve
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            source="tag ${GITHUB_REF_NAME}"
+          else
+            version="${INPUT_VERSION:-$package_version}"
+            source="manual run"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid release version '${version}'. Expected X.Y.Z or X.Y.Z-prerelease."
+            exit 1
+          fi
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+          if [ "$version" != "$package_version" ]; then
+            echo "::warning::package.json is at ${package_version} while releasing ${version} (${source}). Installers are labeled ${version}; commit the version bump afterwards to keep the repo in sync."
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${version} from ${source} (prerelease=${prerelease})"
+
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux
+            os: ubuntu-latest
+            build_script: build:linux
+            artifact_name: linux-installers
+          - label: Windows
+            os: windows-latest
+            build_script: build:win
+            artifact_name: windows-installers
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Label package version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const [file, version] = process.argv.slice(1);
+            const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+            if (pkg.version === version) {
+              console.log(`${file} already at ${version}`);
+              process.exit(0);
+            }
+            pkg.version = version;
+            fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
+            console.log(`${file} version set to ${version}`);
+          ' package.json "$RELEASE_VERSION"
+
+      - name: Build installers
+        run: npm run ${{ matrix.build_script }} -- --publish never
+
+      - name: Collect installer artifacts
+        shell: bash
+        run: |
+          shopt -s nullglob
+          mkdir -p artifacts
+          found=0
+          for file in dist/*.AppImage dist/*.deb dist/*.exe; do
+            cp "$file" artifacts/
+            found=1
+          done
+          if [ "$found" -ne 1 ]; then
+            echo "::error::electron-builder produced no installer artifacts"
+            ls -la dist || true
+            exit 1
+          fi
+          ls -la artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Linux installers
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-installers
+          path: assets
+          merge-multiple: true
+
+      - name: Download Windows installers
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installers
+          path: assets
+          merge-multiple: true
+
+      - name: Create release and upload installers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          # Validate tag
+          if [ -z "$TAG" ]; then
+            echo "::error::Release tag is empty"
+            exit 1
+          fi
+
+          shopt -s nullglob
+          assets=(assets/*)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "::error::No installer assets were downloaded from the build jobs"
+            exit 1
+          fi
+          create_flags=()
+          if [ "$PRERELEASE" = "true" ]; then
+            create_flags+=(--prerelease)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$FORCE" != "true" ]; then
+              echo "::error::Release $TAG already exists. Run the workflow manually with 'force' to replace its assets, or release a higher version."
+              exit 1
+            fi
+            echo "Release $TAG already exists; force is set, replacing its assets."
+          else
+            cat > release-notes.md <<'NOTES'
+          ## Installers
+
+          Built by GitHub Actions on the native target OS. These binaries are unsigned, so Windows SmartScreen and Linux may warn on first run.
+
+          ### Linux
+          - `*.AppImage` - run directly after `chmod +x`.
+          - `*.deb` - install with `sudo apt install ./strata-widget_<version>_amd64.deb`.
+
+          ### Windows
+          - `* Setup *.exe` - installer with a selectable installation directory.
+          - `*.exe` portable - single file, no installation.
+
+          Point the widget at a running Strata inference server (Settings panel: server URL + Bearer API key). On Ubuntu, allow the AppImage sandbox helper to run setuid root, or launch with `--no-sandbox`.
+          NOTES
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file release-notes.md "${create_flags[@]}"
+          fi
+          gh release upload "$TAG" "${assets[@]}" --clobber
