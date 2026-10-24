@@ -12,23 +12,24 @@
   <header class="bar" id="drag-bar">
     <span class="bar__brand">
       <span class="dot" id="dot" data-state="idle"></span>
-      <span id="brand-text">Strata</span>
+      <span class="bar__heading"><span class="bar__eyebrow">INFERENCE SERVER</span><span id="brand-text">Strata</span></span>
     </span>
     <span class="bar__model" id="model-name" title="model">–</span>
     <span class="strip" id="strip" hidden>
-      <span class="dot" id="strip-dot" data-state="idle"></span>
+      <svg class="strip__logo" viewBox="0 0 24 24" aria-label="Strata" role="img"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></svg>
       <b id="strip-state">Idle</b>
       <span class="strip__model" id="strip-model">–</span>
-      <span class="strip__kv"><b id="strip-speed">–</b><small>t/s</small></span>
-      <span class="strip__kv"><b id="strip-gpu">–</b><small>% gpu</small></span>
-      <span class="strip__kv"><b id="strip-ctx">–</b><small>% ctx</small></span>
+      <span class="strip__kv" title="Decode speed in tokens per second"><b id="strip-speed">–</b><small>t/s</small></span>
+      <span class="strip__kv" title="GPU utilization"><b><span id="strip-gpu">–</span>%</b><small>GPU</small></span>
+      <span class="strip__kv" title="Context used"><b><span id="strip-ctx">–</span>%</b><small>CTX</small></span>
+      <span class="dot" id="strip-dot" data-state="idle"></span>
     </span>
     <span class="bar__spacer"></span>
     <button class="ibtn" id="btn-pin" title="Always on top (compat mode)">
       <svg viewBox="0 0 24 24"><path d="M16 3l5 5-4 1-3 3-1 5-4-4-4 4 4-4-1-5 3-3-1-5z"/></svg>
     </button>
     <button class="ibtn" id="btn-compact" title="Compact mode (tab bar)">
-      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg>
+      <span class="compact-icon" aria-hidden="true">▤</span><span class="expand-icon" aria-hidden="true">▢</span>
     </button>
     <button class="ibtn" id="btn-theme" title="Toggle dark / light">
       <svg viewBox="0 0 24 24" id="theme-icon"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>

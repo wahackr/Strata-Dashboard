@@ -2,7 +2,8 @@
 
 A compact, always-on-top desktop widget for the [Strata](https://github.com/Niko1221/Strata)
 inference server monitor — the same Monitor view as the web dashboard, in a small
-frameless window that floats above everything.
+window that can float above everything. Full mode uses the native system title
+bar; compact mode is a rounded, frameless strip.
 
 ## Screenshots
 
@@ -11,7 +12,7 @@ Monitor view, light and dark:
 | ![Monitor — light theme](docs/screenshots/widget-light.png) | ![Monitor — dark theme](docs/screenshots/widget-dark.png) |
 |---|---|
 
-Compact mode — the window shrinks to a tab-bar-sized strip (560×44) showing state,
+Compact mode — the window shrinks to a tab-bar-sized strip (560×46) showing state,
 model, speed, GPU load, and context fill:
 
 | ![Compact strip — light](docs/screenshots/mini-light.png) | ![Compact strip — dark](docs/screenshots/mini-dark.png) |
@@ -30,15 +31,21 @@ model, speed, GPU load, and context fill:
 - **Recent requests** — its own tab with a scrollable table (last 60) showing status,
   prompt/reused/output tokens, and decode t/s.
 - **Compact mode** — shrinks the window to a Chrome-tab-bar-sized strip showing only
-  model state, speed, GPU load, and context fill; toggled from the bar or tray menu.
+  model state, speed, GPU load, and context fill, styled to match
+  [Codex Usage UI](https://github.com/wahackr/Codex-Usage-UI). Use the expand button
+  to return to the full monitor; theme, pin, and settings remain in the tray menu.
+  Compact mode hides the taskbar entry; full mode restores it. Click the tray icon
+  or choose **Show Strata Widget** from its menu to bring the widget back.
 - **Compat mode** — pin button (📌) sets always-on-top at the `screen-saver` window
   level, which floats above normal windows and fullscreen apps on both Windows and
   Linux/X11; the widget also joins all virtual desktops.
-- **Dark / light theme** — moon/sun toggle, persisted.
+- **Dark / light theme** — moon/sun toggle, persisted. Both full and compact views
+  use the Codex Usage UI palette, soft gradients, thin borders, and green accents.
 - **State-aware tray icon** — the tray dot is colored by model state (idle grey,
   reading blue, generating green, queued amber, error red).
-- **Cross-platform** — Electron on Windows and Linux; frameless window with drag
-  region, tray menu, settings panel (server URL, API key, opacity, poll interval).
+- **Cross-platform** — Electron on Windows and Linux; native title bar in full mode,
+  rounded transparent corners and a drag region in compact mode, tray menu, and
+  settings panel (server URL, API key, opacity, poll interval).
   Settings persist in the app's user-data directory; the API key is stored with
   OS-level encryption (`safeStorage`) where available.
 

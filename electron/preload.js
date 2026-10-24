@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("strata", {
   minimize: () => ipcRenderer.send("win:minimize"),
   close: () => ipcRenderer.send("win:close"),
   resetSize: () => ipcRenderer.send("win:reset-size"),
+  fitContent: (height, width) => ipcRenderer.send("win:fit-content", height, width),
   settingsHeight: (open) => ipcRenderer.send("win:settings-height", Boolean(open)),
   onMetrics: (cb) => ipcRenderer.on("metrics", (_e, p) => cb(p)),
   onSettings: (cb) => ipcRenderer.on("settings", (_e, s) => cb(s)),
