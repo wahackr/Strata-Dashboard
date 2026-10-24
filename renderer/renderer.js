@@ -67,7 +67,7 @@ function setBadges(on, state) {
 /* ---- render ---- */
 function renderConnected(health) {
   $("brand-text").textContent = "Strata";
-  if (health?.model) { $("model-name").textContent = health.model; $("strip-model").textContent = health.model; }
+  if (health?.model) { $("model-name").textContent = health.model; $("strip-model").textContent = health.model; $("strip-model").title = health.model; }
 }
 
 function renderFailure(status, error) {
@@ -227,6 +227,9 @@ function applyCompact(on) {
   else delete document.documentElement.dataset.compact;
   $("strip").hidden = !on;
   $("btn-compact").classList.toggle("ibtn--on", Boolean(on));
+  $("btn-compact").title = on ? "Exit compact mode" : "Compact mode (tab bar)";
+  $("btn-compact").setAttribute("aria-label", $("btn-compact").title);
+  $("btn-compact").setAttribute("aria-pressed", String(Boolean(on)));
 }
 
 /* ---- tabs: Monitor / Requests ---- */
@@ -355,6 +358,25 @@ $("set-save").onclick = async () => {
 
 /* ---- boot ---- */
 buildCards();
+
+function fitWindowToContent() {
+  if (settings.compact || $("tab-monitor").hidden) return;
+  const monitor = $("tab-monitor");
+  window.strata.fitContent(Math.ceil(window.innerHeight + monitor.scrollHeight - monitor.clientHeight), window.innerWidth);
+}
+
+// Measure after layout and font loading rather than guessing from fixed sizes.
+// Observe the cards too: live text and width changes can alter their height.
+if (typeof ResizeObserver === "function") {
+  let fitFrame;
+  const observer = new ResizeObserver(() => {
+    cancelAnimationFrame(fitFrame);
+    fitFrame = requestAnimationFrame(fitWindowToContent);
+  });
+  for (const element of document.querySelectorAll(".widget, .bar, .tabs, #tab-monitor, #tab-monitor > section")) observer.observe(element);
+  document.fonts.ready.then(fitWindowToContent);
+}
+
 (async () => {
   const state = await window.strata.getState();
   settings = { ...settings, ...state.settings };

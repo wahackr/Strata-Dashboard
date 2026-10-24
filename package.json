@@ -12,7 +12,7 @@
   "scripts": {
     "start": "electron .",
     "check": "node --check electron/main.js && node --check electron/preload.js && node --check renderer/renderer.js",
-    "test": "node test/smoke.js",
+    "test": "node test/window.js && node test/smoke.js",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
