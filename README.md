@@ -3,7 +3,8 @@
 A compact, always-on-top desktop widget for the [Strata](https://github.com/Niko1221/Strata)
 inference server monitor — the same Monitor view as the web dashboard, in a small
 window that can float above everything. Full mode uses the native system title
-bar; compact mode is a rounded, frameless strip.
+bar; compact mode is a rounded, frameless strip. Run several widgets at once to
+monitor multiple Strata servers side by side.
 
 ## Screenshots
 
@@ -22,6 +23,11 @@ model, speed, GPU load, and context fill:
 
 - **Live metrics** — polls `GET /metrics` (Bearer auth) every second, in the main
   process, so the server's lack of CORS headers doesn't matter.
+- **Multiple servers** — each configured Strata server gets its own widget window,
+  its own poll timer, and its own settings (name, URL, key, poll interval, theme,
+  pin, opacity, compact). Use **Add server** in the settings panel or the tray to
+  open another widget; **Remove server** closes just that one. A second launch of
+  the app focuses the existing widgets instead of starting a duplicate.
 - **The eight cards** — Speed (decode + prefill), GPU load, VRAM, GPU temp, Power,
   PCIe, CPU, Disk read, each with a sparkline from `metrics.history`.
 - **Model state** — Idle / Reading / Generating / Queued / Error badges plus the
@@ -42,7 +48,9 @@ model, speed, GPU load, and context fill:
 - **Dark / light theme** — moon/sun toggle, persisted. Both full and compact views
   use the Codex Usage UI palette, soft gradients, thin borders, and green accents.
 - **State-aware tray icon** — the tray dot is colored by model state (idle grey,
-  reading blue, generating green, queued amber, error red).
+  reading blue, generating green, queued amber, error red). The menu lists every
+  server with its live state, and per-server Show / pin / theme / compact /
+  settings / reload / close entries, plus **Add server…**.
 - **Cross-platform** — Electron on Windows and Linux; native title bar in full mode,
   rounded transparent corners and a drag region in compact mode, tray menu, and
   settings panel (server URL, API key, opacity, poll interval).

@@ -66,11 +66,12 @@ function setBadges(on, state) {
 
 /* ---- render ---- */
 function renderConnected(health) {
-  $("brand-text").textContent = "Strata";
+  applyName(settings.name);
   if (health?.model) { $("model-name").textContent = health.model; $("strip-model").textContent = health.model; $("strip-model").title = health.model; }
 }
 
 function renderFailure(status, error) {
+  applyName(settings.name);
   setDot("error");
   setBadges("error", "error");
   $("state-label").textContent = status === 401 ? "API key needed" : "Server not reachable";
@@ -213,7 +214,13 @@ function render(m) {
 }
 
 /* ---- chrome: theme, pin, settings ---- */
-let settings = { theme: "light", alwaysOnTop: false, opacity: 1, pollMs: 1000, baseUrl: "", apiKey: "" };
+let settings = { id: "", name: "Strata", theme: "light", alwaysOnTop: false, opacity: 1, pollMs: 1000, baseUrl: "", apiKey: "" };
+
+function applyName(name) {
+  const label = name || "Strata";
+  $("brand-text").textContent = label;
+  $("brand-text").title = label;
+}
 
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
@@ -251,6 +258,7 @@ function applyOpacity(v) {
 }
 
 function fillSettings() {
+  $("set-name").value = settings.name || "";
   $("set-url").value = settings.baseUrl || "";
   $("set-key").value = settings.apiKey || "";
   $("set-opacity").value = settings.opacity ?? 1;
@@ -295,8 +303,10 @@ async function connectNow() {
   // Capture the fields in locals BEFORE any await: setSetting broadcasts the
   // saved settings back to this renderer, which replaces the `settings` object
   // mid-await and would wipe a typed key to "" before it ever gets stored.
+  const name = $("set-name").value.trim() || "Strata";
   const url = $("set-url").value.trim();
   const key = $("set-key").value.trim();
+  settings.name = name;
   settings.baseUrl = url;
   settings.apiKey = key;
   if (!url) {
@@ -311,6 +321,7 @@ async function connectNow() {
   }
   status.dataset.state = "pending";
   status.textContent = "Connecting\u2026";
+  await window.strata.setSetting("name", name);
   await window.strata.setSetting("baseUrl", url);
   await window.strata.setSetting("apiKey", key);
   const p = await window.strata.refresh();
@@ -326,11 +337,13 @@ async function connectNow() {
   }
 }
 $("set-connect").onclick = () => connectNow();
-// Editing either field invalidates the previous attempt's status line.
+// Editing a field invalidates the previous attempt's status line.
 $("set-url").oninput = () => { $("set-status").hidden = true; };
 $("set-key").oninput = () => { $("set-status").hidden = true; };
+$("set-name").oninput = () => { $("set-status").hidden = true; };
 $("set-url").onkeydown = (e) => { if (e.key === "Enter") connectNow(); };
 $("set-key").onkeydown = (e) => { if (e.key === "Enter") connectNow(); };
+$("set-name").onkeydown = (e) => { if (e.key === "Enter") connectNow(); };
 $("set-key-reveal").onclick = () => {
   const inp = $("set-key");
   const shown = inp.type === "text";
@@ -340,20 +353,33 @@ $("set-key-reveal").onclick = () => {
 };
 $("set-save").onclick = async () => {
   // Same broadcast trap as connectNow: read every field into locals first.
+  const name = $("set-name").value.trim() || "Strata";
   const url = $("set-url").value.trim();
   const key = $("set-key").value.trim();
   const opacity = Number($("set-opacity").value);
   const pollMs = Number($("set-poll").value);
+  settings.name = name;
   settings.baseUrl = url;
   settings.apiKey = key;
   settings.opacity = opacity;
   settings.pollMs = pollMs;
+  await window.strata.setSetting("name", name);
   await window.strata.setSetting("baseUrl", url);
   await window.strata.setSetting("apiKey", key);
   await window.strata.setSetting("opacity", opacity);
   await window.strata.setSetting("pollMs", pollMs);
   toggleSettings(false);
   window.strata.refresh();
+};
+// Each Strata server gets its own widget window; removing one keeps the others.
+$("set-add").onclick = async () => {
+  await window.strata.addServer();
+  $("set-status").hidden = false;
+  $("set-status").dataset.state = "ok";
+  $("set-status").textContent = "New server window opened";
+};
+$("set-remove").onclick = async () => {
+  await window.strata.removeServer();
 };
 
 /* ---- boot ---- */
@@ -379,7 +405,8 @@ if (typeof ResizeObserver === "function") {
 
 (async () => {
   const state = await window.strata.getState();
-  settings = { ...settings, ...state.settings };
+  settings = { ...settings, ...(state.settings || {}) };
+  applyName(settings.name);
   applyTheme(settings.theme);
   applyPin(settings.alwaysOnTop);
   applyCompact(settings.compact);
@@ -393,6 +420,7 @@ window.strata.onMetrics((p) => {
 });
 window.strata.onSettings((s) => {
   settings = { ...settings, ...s };
+  applyName(settings.name);
   applyTheme(settings.theme);
   applyPin(settings.alwaysOnTop);
   applyCompact(settings.compact);
