@@ -53,9 +53,11 @@ model, speed, GPU load, and context fill:
   settings / reload / close entries, plus **Add server…**.
 - **Cross-platform** — Electron on Windows and Linux; native title bar in full mode,
   rounded transparent corners and a drag region in compact mode, tray menu, and
-  settings panel (server URL, API key, opacity, poll interval).
-  Settings persist in the app's user-data directory; the API key is stored with
-  OS-level encryption (`safeStorage`) where available.
+  settings panel (server name, URL, API key, opacity, poll interval, plus
+  **Add server** and **Remove server**).
+  Settings persist in the app's user-data directory as a list of server profiles;
+  the API key of each profile is stored with OS-level encryption (`safeStorage`)
+  where available.
 
 ## Run
 
@@ -65,7 +67,10 @@ npm start
 ```
 
 By default the widget targets `http://127.0.0.1:8080` with no API key. Set your
-Strata server URL and Bearer key in the ⚙ settings panel (saved on Save).
+Strata server name, URL, and Bearer key in the ⚙ settings panel (saved on Save).
+To monitor more than one server, press **Add server** in that panel (or
+**Add server…** in the tray) — each server opens its own widget window with its
+own settings.
 
 To run the live part of the smoke test against your server:
 
