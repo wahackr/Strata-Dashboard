@@ -238,8 +238,14 @@ function applyCompactSize(instance) {
   if (instance.windowCompact !== Boolean(instance.server.compact)) {
     const previous = win;
     const [x, y] = previous.getPosition();
-    createWindow(instance.server, { x, y, visible: previous.isVisible() || previous.isMinimized() });
+    const next = createWindow(instance.server, { x, y, visible: previous.isVisible() || previous.isMinimized() });
+    // The replacement starts with no payload; carry the last one so its renderer
+    // paints the current state instead of sitting on "Connecting…".
+    next.lastPayload = instance.lastPayload;
     previous.destroy();
+    // createWindow never polls, and closing the old window clears its timer, so
+    // without this the recreated widget would stop fetching metrics for good.
+    startPolling(next);
     return;
   }
   win.setSkipTaskbar(Boolean(instance.server.compact));

@@ -12,6 +12,10 @@ function boot(servers, { wayland = false } = {}) {
   let ready;
   let latest;
   let tray;
+  // Poll evidence: every fetch is counted, and fetchImpl can be swapped to a
+  // promise that never settles so a poll can be left in flight.
+  let fetches = 0;
+  let fetchImpl = async () => ({ status: 503, ok: false });
   class Window extends EventEmitter {
     static all = [];
     constructor(options) { super(); this.options = options; this.size = [options.width, options.height]; this.skipTaskbar = options.skipTaskbar; this.minimum = [options.minWidth, options.minHeight]; this.minimized = false; this.position = [options.x ?? 100, options.y ?? 120]; latest = this; Window.all.push(this); }
@@ -74,7 +78,7 @@ function boot(servers, { wayland = false } = {}) {
     __dirname: path.join(__dirname, '../electron'),
     process: { platform: 'win32' },
     setInterval() {}, clearInterval() {}, setTimeout() {}, clearTimeout() {},
-    fetch: async () => ({ status: 503, ok: false }), AbortController, console, Buffer,
+    fetch: async () => { fetches++; return fetchImpl(); }, AbortController, console, Buffer,
   });
   ready();
   const live = () => [...liveWindows()];
@@ -86,6 +90,9 @@ function boot(servers, { wayland = false } = {}) {
     get window() { return latest; },
     windows: live,
     tray, events, workArea,
+    polls: () => fetches,
+    setFetch: fn => { fetchImpl = fn; },
+    getState: () => handles.get('get-state')({ sender: latest.webContents }),
     setCompact: value => handles.get('set-setting')({ sender: latest.webContents }, 'compact', value),
     fit: (height, sender = latest.webContents, width = 760) => handles.get('win:fit-content')({ sender }, height, width),
     addServer: () => handles.get('server:add')({ sender: latest.webContents }),
@@ -204,4 +211,32 @@ reopen.click();
 assert.equal(multi.windows().length, before, 'tray Open recreates the window for the saved profile');
 assert.equal(multi.windows().some(w => !w.isDestroyed() && w.options.frame), true, 'reopened window is full mode again');
 
-console.log('window modes, taskbar visibility, tray recovery, multi-server windows, and content fitting OK');
+// Regression: switching mode recreates the BrowserWindow. The replacement must
+// start polling again (the old instance's timer dies with its window) and
+// inherit the last payload, or compact mode never connects and expanding back
+// to full mode stops auto-updating. Async because pollOnce resolves in
+// microtasks; the fake fetch is swappable so each poll is observable.
+(async () => {
+  const widget = boot([{ compact: false }]);
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  await settle();
+  assert.equal(widget.polls(), 1, 'boot polls the configured server once');
+  assert.equal(widget.getState().payload.status, 503, 'boot records the failed poll');
+
+  widget.setFetch(() => new Promise(() => {})); // poll stays in flight, never settles
+  widget.setCompact(true);
+  assert.equal(widget.polls(), 2, 'the recreated compact window starts polling again');
+  const compactState = widget.getState();
+  assert.ok(compactState.payload, 'replacement keeps the last payload instead of "Connecting…"');
+  assert.equal(compactState.payload.status, 503, 'the carried payload is the last real result');
+
+  widget.setFetch(async () => ({ status: 200, ok: true, json: async () => ({ live: { state: 'generating' } }) }));
+  widget.setCompact(false);
+  assert.ok(widget.polls() > 2, 'expanding back to full mode polls again');
+  await settle();
+  const fullState = widget.getState();
+  assert.equal(fullState.payload.ok, true, 'full mode updates with live metrics');
+  assert.equal(fullState.payload.metrics.live.state, 'generating', 'the new window renders fresh metrics');
+
+  console.log('window modes, taskbar visibility, tray recovery, multi-server windows, content fitting, and poll restart on mode switch OK');
+})();
