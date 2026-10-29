@@ -28,7 +28,7 @@ global.document = {
 };
 // Captured at load time: renderer.js registers its settings listener during boot.
 let broadcast = null;
-global.window = { strata: { platform: "linux", getState: async () => ({ settings: {}, payload: null }), setSetting: async () => { }, refresh: async () => { }, minimize() { }, close() { }, resetSize() { }, settingsHeight() { }, onMetrics() { }, onSettings: (cb) => { broadcast = cb; }, onOpenSettings() { } } };
+global.window = { strata: { platform: "linux", getState: async () => ({ settings: {}, payload: null }), setSetting: async () => { }, refresh: async () => { }, addServer: async () => [], removeServer: async () => [], minimize() { }, close() { }, resetSize() { }, settingsHeight() { }, onMetrics() { }, onSettings: (cb) => { broadcast = cb; }, onOpenSettings() { } } };
 
 /* ---- load renderer.js ---- */
 const src = fs.readFileSync(path.join(__dirname, "..", "renderer", "renderer.js"), "utf8");

@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld("strata", {
   getState: () => ipcRenderer.invoke("get-state"),
   setSetting: (key, value) => ipcRenderer.invoke("set-setting", key, value),
   refresh: () => ipcRenderer.invoke("refresh"),
+  addServer: () => ipcRenderer.invoke("server:add"),
+  removeServer: () => ipcRenderer.invoke("server:remove"),
   minimize: () => ipcRenderer.send("win:minimize"),
   close: () => ipcRenderer.send("win:close"),
   resetSize: () => ipcRenderer.send("win:reset-size"),

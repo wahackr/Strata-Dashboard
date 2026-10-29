@@ -43,6 +43,9 @@
         "portable"
       ]
     },
+    "portable": {
+      "artifactName": "Strata Widget.${ext}"
+    },
     "linux": {
       "target": [
         "AppImage",
@@ -52,7 +55,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Strata Widget Setup.${ext}"
     }
   },
   "allowScripts": {

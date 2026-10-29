@@ -27,20 +27,21 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: '22'
+  # Pinned to the Node version the app is developed and tested on.
+  NODE_VERSION: '24.22.1'
 
 jobs:
   prepare:
     name: Test and resolve version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       tag: ${{ steps.resolve.outputs.tag }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -94,7 +95,7 @@ jobs:
       matrix:
         include:
           - label: Linux
-            os: ubuntu-latest
+            os: ubuntu-24.04
             build_script: build:linux
             artifact_name: linux-installers
           - label: Windows
@@ -102,9 +103,9 @@ jobs:
             build_script: build:win
             artifact_name: windows-installers
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -160,12 +161,12 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [prepare, build]
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download Linux installers
         uses: actions/download-artifact@v4
@@ -222,8 +223,8 @@ jobs:
           - `*.deb` - install with `sudo apt install ./strata-widget_<version>_amd64.deb`.
 
           ### Windows
-          - `* Setup *.exe` - installer with a selectable installation directory.
-          - `*.exe` portable - single file, no installation.
+          - `Strata Widget Setup.exe` - installer with a selectable installation directory.
+          - `Strata Widget.exe` portable - single file, no installation.
 
           Point the widget at a running Strata inference server (Settings panel: server URL + Bearer API key). On Ubuntu, allow the AppImage sandbox helper to run setuid root, or launch with `--no-sandbox`.
           NOTES

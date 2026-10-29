@@ -3,7 +3,8 @@
 A compact, always-on-top desktop widget for the [Strata](https://github.com/Niko1221/Strata)
 inference server monitor — the same Monitor view as the web dashboard, in a small
 window that can float above everything. Full mode uses the native system title
-bar; compact mode is a rounded, frameless strip.
+bar; compact mode is a rounded, frameless strip. Run several widgets at once to
+monitor multiple Strata servers side by side.
 
 ## Screenshots
 
@@ -22,6 +23,11 @@ model, speed, GPU load, and context fill:
 
 - **Live metrics** — polls `GET /metrics` (Bearer auth) every second, in the main
   process, so the server's lack of CORS headers doesn't matter.
+- **Multiple servers** — each configured Strata server gets its own widget window,
+  its own poll timer, and its own settings (name, URL, key, poll interval, theme,
+  pin, opacity, compact). Use **Add server** in the settings panel or the tray to
+  open another widget; **Remove server** closes just that one. A second launch of
+  the app focuses the existing widgets instead of starting a duplicate.
 - **The eight cards** — Speed (decode + prefill), GPU load, VRAM, GPU temp, Power,
   PCIe, CPU, Disk read, each with a sparkline from `metrics.history`.
 - **Model state** — Idle / Reading / Generating / Queued / Error badges plus the
@@ -42,12 +48,16 @@ model, speed, GPU load, and context fill:
 - **Dark / light theme** — moon/sun toggle, persisted. Both full and compact views
   use the Codex Usage UI palette, soft gradients, thin borders, and green accents.
 - **State-aware tray icon** — the tray dot is colored by model state (idle grey,
-  reading blue, generating green, queued amber, error red).
+  reading blue, generating green, queued amber, error red). The menu lists every
+  server with its live state, and per-server Show / pin / theme / compact /
+  settings / reload / close entries, plus **Add server…**.
 - **Cross-platform** — Electron on Windows and Linux; native title bar in full mode,
   rounded transparent corners and a drag region in compact mode, tray menu, and
-  settings panel (server URL, API key, opacity, poll interval).
-  Settings persist in the app's user-data directory; the API key is stored with
-  OS-level encryption (`safeStorage`) where available.
+  settings panel (server name, URL, API key, opacity, poll interval, plus
+  **Add server** and **Remove server**).
+  Settings persist in the app's user-data directory as a list of server profiles;
+  the API key of each profile is stored with OS-level encryption (`safeStorage`)
+  where available.
 
 ## Run
 
@@ -57,7 +67,10 @@ npm start
 ```
 
 By default the widget targets `http://127.0.0.1:8080` with no API key. Set your
-Strata server URL and Bearer key in the ⚙ settings panel (saved on Save).
+Strata server name, URL, and Bearer key in the ⚙ settings panel (saved on Save).
+To monitor more than one server, press **Add server** in that panel (or
+**Add server…** in the tray) — each server opens its own widget window with its
+own settings.
 
 To run the live part of the smoke test against your server:
 
