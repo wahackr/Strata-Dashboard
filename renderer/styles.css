@@ -65,7 +65,7 @@ body {
 .bar__brand { display: flex; align-items: center; gap: 9px; }
 .bar__heading { display: flex; flex-direction: column; }
 .bar__eyebrow { color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .18em; }
-#brand-text { font-size: 27px; font-weight: 700; letter-spacing: -.04em; }
+#brand-text { font-size: 27px; font-weight: 700; letter-spacing: -.04em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar__model { color: var(--muted); font-size: 11px; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar__spacer { flex: 1; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }

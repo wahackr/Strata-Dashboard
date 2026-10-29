@@ -108,6 +108,7 @@
 
   <div class="settings" id="settings" hidden>
     <div class="settings__title">Settings</div>
+    <label>Name<input id="set-name" type="text" placeholder="Strata" spellcheck="false"></label>
     <label>Server<input id="set-url" type="text" placeholder="http://127.0.0.1:8080" spellcheck="false"></label>
     <label>API key<span class="key-row"><input id="set-key" type="password" placeholder="Bearer key" spellcheck="false"><button class="key-reveal" id="set-key-reveal" type="button" title="Show">Show</button></span></label>
     <label>Opacity<span class="range-row"><input id="set-opacity" type="range" min="0.5" max="1" step="0.05"><span id="opacity-val">100%</span></span></label>
@@ -117,9 +118,11 @@
       <button class="btn btn--ghost" id="set-save">Save</button>
       <button class="btn btn--ghost" id="set-reset">Reset size</button>
       <button class="btn btn--ghost" id="set-close">Close</button>
+      <button class="btn btn--ghost" id="set-add">Add server</button>
+      <button class="btn btn--ghost" id="set-remove">Remove server</button>
     </div>
     <div class="settings__status" id="set-status" hidden></div>
-    <div class="settings__hint">Connect saves server/key and polls right away (Enter does the same). Sliders apply instantly. Compact = tab bar (state · speed · GPU · ctx). Compat mode = pin (📌). Theme = moon/sun. Drag the bar to move.</div>
+    <div class="settings__hint">Connect saves name/server/key and polls right away (Enter does the same). Sliders apply instantly. Each server has its own window, theme, and pin. Add server opens another widget for a second Strata server; Remove closes this one. Compact = tab bar (state · speed · GPU · ctx). Compat mode = pin (📌). Drag the bar to move.</div>
   </div>
 
 </div>

@@ -1,11 +1,14 @@
 // Strata Widget — main process.
-// Polls the Strata server here so the renderer never hits CORS, and owns the
-// window chrome: always-on-top ("compat mode"), theme, settings persistence.
+// One widget window per Strata server profile. Each profile polls its own
+// server here so the renderer never hits CORS, and owns its window chrome:
+// always-on-top ("compat mode"), theme, settings persistence.
 const { app, BrowserWindow, ipcMain, Tray, Menu, safeStorage, nativeImage, screen } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 
 const DEFAULTS = {
+  id: "",
+  name: "Strata",
   baseUrl: "http://127.0.0.1:8080",
   apiKey: "",
   theme: "light",
@@ -17,52 +20,75 @@ const DEFAULTS = {
 
 const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
 
-function loadSettings() {
+function nextId(taken) {
+  let n = 1;
+  while (taken.has(`srv-${n}`)) n++;
+  return `srv-${n}`;
+}
+
+// A key typed into Settings (plaintext) always wins over a stale encrypted
+// one, so a leftover apiKeyEnc can never silently override what the user
+// just entered.
+function decryptKey(raw) {
+  if (raw.apiKey) return raw.apiKey;
+  if (raw.apiKeyEnc && safeStorage.isEncryptionAvailable()) {
+    try { return safeStorage.decryptString(Buffer.from(raw.apiKeyEnc, "base64")); } catch { return ""; }
+  }
+  return "";
+}
+
+function normalizeServer(raw, taken) {
+  const s = { ...DEFAULTS, ...raw };
+  delete s.apiKeyEnc; // storage-only, never a runtime setting
+  s.apiKey = decryptKey(raw);
+  if (!s.id || taken.has(s.id)) s.id = nextId(taken);
+  taken.add(s.id);
+  return s;
+}
+
+function loadConfig() {
   try {
     const raw = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
-    const s = { ...DEFAULTS, ...raw };
-    delete s.apiKeyEnc; // storage-only, never a runtime setting
-    // A key typed into Settings (plaintext) always wins over a stale encrypted
-    // one, so a leftover apiKeyEnc can never silently override what the user
-    // just entered.
-    if (raw.apiKey) {
-      s.apiKey = raw.apiKey;
-    } else if (raw.apiKeyEnc && safeStorage.isEncryptionAvailable()) {
-      try { s.apiKey = safeStorage.decryptString(Buffer.from(raw.apiKeyEnc, "base64")); } catch { s.apiKey = ""; }
-    } else {
-      s.apiKey = "";
-    }
-    return s;
+    // Legacy single-server files are a flat object; migrate them to profile 1.
+    const list = Array.isArray(raw.servers) && raw.servers.length ? raw.servers : [raw];
+    const taken = new Set();
+    return list.map((s) => normalizeServer(s, taken));
   } catch {
-    return { ...DEFAULTS };
+    return [normalizeServer({}, new Set())];
   }
 }
 
-function saveSettings(s) {
-  const out = { ...s };
-  delete out.apiKeyEnc; // keep apiKey / apiKeyEnc mutually exclusive
-  const key = out.apiKey || "";
-  if (!key) {
-    out.apiKey = "";
-  } else {
-    // Prefer OS-level encryption, but never let a failing encryptString abort
-    // the whole write (that would silently drop the key the user just typed).
-    let enc = null;
-    try {
-      if (safeStorage.isEncryptionAvailable()) enc = safeStorage.encryptString(key).toString("base64");
-    } catch { enc = null; }
-    if (enc) out.apiKeyEnc = enc;
-    else out.apiKey = key;
-  }
-  try { fs.writeFileSync(settingsFile(), JSON.stringify(out, null, 2)); } catch { }
+function saveConfig() {
+  const out = servers.map((s) => {
+    const o = { ...s };
+    delete o.apiKeyEnc; // keep apiKey / apiKeyEnc mutually exclusive
+    const key = o.apiKey || "";
+    if (!key) {
+      o.apiKey = "";
+    } else {
+      // Prefer OS-level encryption, but never let a failing encryptString abort
+      // the whole write (that would silently drop the key the user just typed).
+      let enc = null;
+      try {
+        if (safeStorage.isEncryptionAvailable()) enc = safeStorage.encryptString(key).toString("base64");
+      } catch { enc = null; }
+      if (enc) o.apiKeyEnc = enc;
+      else o.apiKey = key;
+    }
+    return o;
+  });
+  try { fs.writeFileSync(settingsFile(), JSON.stringify({ servers: out }, null, 2)); } catch { }
 }
 
-let settings = loadSettings();
-let win = null;
+let servers = loadConfig();
+// serverId -> { server, win, pollTimer, lastPayload, windowCompact }
+const instances = new Map();
 let tray = null;
-let pollTimer = null;
-let lastPayload = null;
-let windowCompact = null;
+
+const serverById = (id) => servers.find((s) => s.id === id) || null;
+const instanceOfSender = (sender) =>
+  [...instances.values()].find((i) => i.win && !i.win.isDestroyed() && i.win.webContents === sender) || null;
+const serverList = () => servers.map((s) => ({ id: s.id, name: s.name }));
 
 // Tray dot mirrors the model state, like the title-bar dot in the window.
 const TRAY_STATES = ["idle", "reading", "generating", "queued", "error"];
@@ -82,17 +108,17 @@ function normalizeBase(u) {
   return /^https?:\/\//.test(v) ? v : `http://${v}`;
 }
 
-async function request(pathname, { timeout = 4000 } = {}) {
-  const base = normalizeBase(settings.baseUrl);
+async function request(server, pathname, { timeout = 4000 } = {}) {
+  const base = normalizeBase(server.baseUrl);
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
     const headers = {};
-    if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
+    if (server.apiKey) headers.Authorization = `Bearer ${server.apiKey}`;
     const r = await fetch(`${base}/${pathname}`, { headers, signal: ctrl.signal });
     if (r.status === 401) {
       // Terminal evidence of what the widget actually sent, without leaking the key.
-      console.log(`[strata] GET ${base}/${pathname} -> 401 (Authorization ${settings.apiKey ? "sent" : "missing"})`);
+      console.log(`[strata] GET ${base}/${pathname} -> 401 (Authorization ${server.apiKey ? "sent" : "missing"})`);
       return { status: 401 };
     }
     if (!r.ok) return { status: r.status };
@@ -104,115 +130,51 @@ async function request(pathname, { timeout = 4000 } = {}) {
   }
 }
 
-async function pollOnce() {
-  const m = await request("metrics");
+async function pollOnce(instance) {
+  const server = instance.server;
+  const m = await request(server, "metrics");
   if (m.status === 200) {
-    const h = await request("health", { timeout: 6000 });
-    lastPayload = { ok: true, status: 200, metrics: m.body, health: h.status === 200 ? h.body : null };
+    const h = await request(server, "health", { timeout: 6000 });
+    instance.lastPayload = { ok: true, status: 200, metrics: m.body, health: h.status === 200 ? h.body : null };
   } else {
-    lastPayload = { ok: false, status: m.status, error: m.error || `HTTP ${m.status}`, metrics: null, auth: Boolean(settings.apiKey) };
+    instance.lastPayload = { ok: false, status: m.status, error: m.error || `HTTP ${m.status}`, metrics: null, auth: Boolean(server.apiKey) };
   }
-  if (win && !win.isDestroyed()) win.webContents.send("metrics", lastPayload);
+  if (instance.win && !instance.win.isDestroyed()) instance.win.webContents.send("metrics", instance.lastPayload);
   updateTrayState();
+}
+
+function startPolling(instance) {
+  clearInterval(instance.pollTimer);
+  instance.pollTimer = setInterval(() => pollOnce(instance), Math.max(250, instance.server.pollMs || 1000));
+  pollOnce(instance);
+}
+
+function trayStateFor(instance) {
+  const live = instance.lastPayload?.metrics?.live || {};
+  return instance.lastPayload?.ok
+    ? (live.queued > 0 ? "queued" : live.state || "idle")
+    : "error";
 }
 
 function updateTrayState() {
   if (!tray) return;
-  const live = lastPayload?.metrics?.live || {};
-  const state = lastPayload?.ok
-    ? (live.queued > 0 ? "queued" : live.state || "idle")
-    : "error";
-  tray.setImage(trayIcon(state));
+  // The tray dot mirrors the first server's model state, like the title-bar dot.
+  const first = instances.get(servers[0]?.id);
+  tray.setImage(trayIcon(first ? trayStateFor(first) : "idle"));
 }
 
-function startPolling() {
-  clearInterval(pollTimer);
-  pollTimer = setInterval(pollOnce, Math.max(250, settings.pollMs || 1000));
-  pollOnce();
-}
-
-function applyWindowFlags() {
-  if (!win || win.isDestroyed()) return;
-  // screen-saver level keeps the widget above ordinary windows and fullscreen
-  // apps on both Windows and Linux/X11.
-  win.setAlwaysOnTop(settings.alwaysOnTop, settings.alwaysOnTop ? "screen-saver" : "normal");
-  win.setVisibleOnAllWorkspaces(Boolean(settings.alwaysOnTop), { visibleOnFullScreen: true });
-  // setOpacity is win32/darwin only (no-op on Linux); the renderer fades the
-  // page with CSS there instead.
-  if (process.platform === "win32" || process.platform === "darwin") {
-    win.setOpacity(settings.opacity ?? 1);
-  }
-  win.setBackgroundColor(settings.compact ? "#00000000" : settings.theme === "dark" ? "#10120f" : "#f5f7f0");
-  rebuildTray();
-}
-
-function applyCompactSize() {
-  if (!win || win.isDestroyed()) return;
-  // Native frames and transparency are creation-time options in Electron.
-  // Create the replacement first so switching modes never closes every window.
-  if (windowCompact !== Boolean(settings.compact)) {
-    const previous = win;
-    const [x, y] = previous.getPosition();
-    createWindow({ x, y, visible: previous.isVisible() || previous.isMinimized() });
-    previous.destroy();
-    return;
-  }
-  win.setSkipTaskbar(Boolean(settings.compact));
-  if (settings.compact) {
-    win.setMinimumSize(380, COMPACT_SIZE.height);
-    win.setContentSize(COMPACT_SIZE.width, COMPACT_SIZE.height);
-  } else {
-    win.setMinimumSize(FULL_SIZE.width, 340);
-    win.setContentSize(FULL_SIZE.width, FULL_SIZE.height);
-  }
-  rebuildTray();
-}
-
-function showWindow() {
-  if (!win || win.isDestroyed()) return;
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
-}
-
-function rebuildTray() {
-  if (!tray) return;
-  const on = settings.alwaysOnTop;
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Show Strata Widget", click: showWindow },
-    { type: "separator" },
-    { label: on ? "✓ Always on top" : "Always on top", click: () => setSetting("alwaysOnTop", !on) },
-    { label: settings.theme === "dark" ? "✓ Dark theme" : "Light theme", click: () => setSetting("theme", settings.theme === "dark" ? "light" : "dark") },
-    { label: settings.compact ? "✓ Compact mode" : "Compact mode", click: () => setSetting("compact", !settings.compact) },
-    { label: "Open settings…", click: () => win?.webContents.send("open-settings") },
-    { type: "separator" },
-    { label: "Reload data", click: () => pollOnce() },
-    { label: "Quit", click: () => app.quit() },
-  ]));
-  tray.setToolTip(`Strata Widget${on ? " · pinned" : ""}`);
-  updateTrayState();
-}
-
-function setSetting(key, value) {
-  settings[key] = value;
-  saveSettings(settings);
-  if (key === "pollMs") startPolling();
-  else if (key === "compact") applyCompactSize();
-  else applyWindowFlags();
-  if (win && !win.isDestroyed()) win.webContents.send("settings", settings);
-}
-
-function createWindow({ x, y, visible = true } = {}) {
-  const compact = Boolean(settings.compact);
+function createWindow(server, { x, y, visible = true } = {}) {
+  const compact = Boolean(server.compact);
+  const instance = { server, win: null, pollTimer: null, lastPayload: null, windowCompact: compact };
   const created = new BrowserWindow({
-    width: settings.compact ? COMPACT_SIZE.width : FULL_SIZE.width,
-    height: settings.compact ? COMPACT_SIZE.height : FULL_SIZE.height,
+    width: compact ? COMPACT_SIZE.width : FULL_SIZE.width,
+    height: compact ? COMPACT_SIZE.height : FULL_SIZE.height,
     minWidth: compact ? 380 : FULL_SIZE.width,
     minHeight: compact ? COMPACT_SIZE.height : 340,
     x, y,
     useContentSize: true,
     frame: !compact,
-    title: "Strata Widget",
+    title: server.name ? `${server.name} — Strata Widget` : "Strata Widget",
     titleBarStyle: "default",
     transparent: compact,
     roundedCorners: true,
@@ -222,7 +184,7 @@ function createWindow({ x, y, visible = true } = {}) {
     fullscreenable: !compact,
     skipTaskbar: compact,
     show: false,
-    backgroundColor: compact ? "#00000000" : settings.theme === "dark" ? "#10120f" : "#f5f7f0",
+    backgroundColor: compact ? "#00000000" : server.theme === "dark" ? "#10120f" : "#f5f7f0",
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -231,28 +193,178 @@ function createWindow({ x, y, visible = true } = {}) {
       sandbox: false,
     },
   });
-  win = created;
-  windowCompact = compact;
+  instance.win = created;
+  instances.set(server.id, instance);
   created.once("ready-to-show", () => {
     if (visible && !created.isDestroyed()) created.show();
   });
-  win.removeMenu();
-  win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
-  applyWindowFlags();
+  created.removeMenu();
+  created.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
+  applyWindowFlags(instance);
   // The constructor already sets size and constraints. Reapplying native size
   // changes here races the window manager's initial configure on Linux.
-  created.on("closed", () => { if (win === created) win = null; });
+  created.on("closed", () => {
+    clearInterval(instance.pollTimer);
+    instance.pollTimer = null;
+    if (instances.get(server.id)?.win === created) instances.delete(server.id);
+    rebuildTray();
+  });
+  return instance;
+}
+
+function applyWindowFlags(instance) {
+  const win = instance.win;
+  if (!win || win.isDestroyed()) return;
+  const server = instance.server;
+  // screen-saver level keeps the widget above ordinary windows and fullscreen
+  // apps on both Windows and Linux/X11.
+  win.setAlwaysOnTop(server.alwaysOnTop, server.alwaysOnTop ? "screen-saver" : "normal");
+  win.setVisibleOnAllWorkspaces(Boolean(server.alwaysOnTop), { visibleOnFullScreen: true });
+  // setOpacity is win32/darwin only (no-op on Linux); the renderer fades the
+  // page with CSS there instead.
+  if (process.platform === "win32" || process.platform === "darwin") {
+    win.setOpacity(server.opacity ?? 1);
+  }
+  win.setBackgroundColor(server.compact ? "#00000000" : server.theme === "dark" ? "#10120f" : "#f5f7f0");
+  win.setTitle(server.name ? `${server.name} — Strata Widget` : "Strata Widget");
+  rebuildTray();
+}
+
+function applyCompactSize(instance) {
+  const win = instance.win;
+  if (!win || win.isDestroyed()) return;
+  // Native frames and transparency are creation-time options in Electron.
+  // Create the replacement first so switching modes never closes every window.
+  if (instance.windowCompact !== Boolean(instance.server.compact)) {
+    const previous = win;
+    const [x, y] = previous.getPosition();
+    createWindow(instance.server, { x, y, visible: previous.isVisible() || previous.isMinimized() });
+    previous.destroy();
+    return;
+  }
+  win.setSkipTaskbar(Boolean(instance.server.compact));
+  if (instance.server.compact) {
+    win.setMinimumSize(380, COMPACT_SIZE.height);
+    win.setContentSize(COMPACT_SIZE.width, COMPACT_SIZE.height);
+  } else {
+    win.setMinimumSize(FULL_SIZE.width, 340);
+    win.setContentSize(FULL_SIZE.width, FULL_SIZE.height);
+  }
+  rebuildTray();
+}
+
+function showInstance(instance) {
+  if (!instance || !instance.win || instance.win.isDestroyed()) return;
+  if (instance.win.isMinimized()) instance.win.restore();
+  instance.win.show();
+  instance.win.focus();
+}
+
+// Show every widget; used when a second launch of the app is refused by the
+// single-instance lock.
+function showAllWindows() {
+  for (const instance of instances.values()) showInstance(instance);
+}
+
+function rebuildTray() {
+  if (!tray) return;
+  const items = [];
+  for (const server of servers) {
+    const instance = instances.get(server.id);
+    const label = server.name || "Strata";
+    const sub = [];
+    if (instance) {
+      sub.push({ label: "Show", click: () => showInstance(instance) });
+      sub.push({ type: "separator" });
+      sub.push({
+        label: server.alwaysOnTop ? "✓ Always on top" : "Always on top",
+        click: () => setSetting(instance, "alwaysOnTop", !server.alwaysOnTop),
+      });
+      sub.push({
+        label: server.theme === "dark" ? "✓ Dark theme" : "Light theme",
+        click: () => setSetting(instance, "theme", server.theme === "dark" ? "light" : "dark"),
+      });
+      sub.push({
+        label: server.compact ? "✓ Compact mode" : "Compact mode",
+        click: () => setSetting(instance, "compact", !server.compact),
+      });
+      sub.push({ label: "Open settings…", click: () => instance.win?.webContents.send("open-settings") });
+      sub.push({ label: "Reload data", click: () => pollOnce(instance) });
+      sub.push({ type: "separator" });
+      sub.push({ label: "Close window", click: () => instance.win?.close() });
+    } else {
+      // Profile saved but its window was closed: reopen it rather than lose it.
+      sub.push({ label: "Open", click: () => startServer(server) });
+      sub.push({ type: "separator" });
+    }
+    sub.push({ label: "Remove server", click: () => removeServer(server.id) });
+    items.push({ label: `${label} · ${instance ? trayStateFor(instance) : "closed"}`, submenu: sub });
+  }
+  items.push({ type: "separator" });
+  items.push({ label: "Add server…", click: () => addServer() });
+  items.push({ label: "Quit", click: () => app.quit() });
+  tray.setContextMenu(Menu.buildFromTemplate(items));
+  tray.setToolTip(`Strata Widget · ${servers.length} server${servers.length === 1 ? "" : "s"}`);
+  updateTrayState();
+}
+
+function setSetting(instance, key, value) {
+  instance.server[key] = value;
+  saveConfig();
+  if (key === "pollMs") startPolling(instance);
+  else if (key === "compact") applyCompactSize(instance);
+  else applyWindowFlags(instance);
+  if (instance.win && !instance.win.isDestroyed()) instance.win.webContents.send("settings", instance.server);
+}
+
+// A new profile always gets its own window, so monitoring a second server never
+// disturbs the first one.
+function addServer() {
+  const taken = new Set(servers.map((s) => s.id));
+  const server = { ...DEFAULTS, id: nextId(taken), name: `Strata ${servers.length + 1}` };
+  servers.push(server);
+  saveConfig();
+  const instance = createWindow(server);
+  startPolling(instance);
+  rebuildTray();
+  return server;
+}
+
+function removeServer(id) {
+  const remaining = servers.filter((s) => s.id !== id);
+  servers = remaining.length ? remaining : [normalizeServer({}, new Set())];
+  saveConfig();
+  // Keep at least one widget window alive: window-all-closed quits the app.
+  // Start the replacement before closing so the app never sees zero windows.
+  if (!servers.some((s) => s.id !== id && instances.has(s.id))) startServer(servers[0]);
+  const instance = instances.get(id);
+  if (instance?.win && !instance.win.isDestroyed()) instance.win.close();
+  rebuildTray();
+}
+
+function startServer(server) {
+  const instance = createWindow(server);
+  startPolling(instance);
+  rebuildTray();
+  return instance;
 }
 
 // Frameless window controls.
-ipcMain.on("win:minimize", () => win?.minimize());
+ipcMain.on("win:minimize", (event) => instanceOfSender(event.sender)?.win?.minimize());
 ipcMain.on("win:close", () => app.quit());
-ipcMain.on("win:reset-size", () => { applyCompactSize(); win?.center(); });
+ipcMain.on("win:reset-size", (event) => {
+  const instance = instanceOfSender(event.sender);
+  if (!instance) return;
+  applyCompactSize(instance);
+  instance.win?.center();
+});
 
 // Fit the measured renderer content, including native frame height, to this
 // display. Grow only: a larger user-selected window should remain larger.
 ipcMain.on("win:fit-content", (event, height, renderedWidth) => {
-  if (!win || win.isDestroyed() || settings.compact || event.sender !== win.webContents) return;
+  const instance = instanceOfSender(event.sender);
+  const win = instance?.win;
+  if (!win || win.isDestroyed() || instance.server.compact) return;
   if (!Number.isFinite(height) || height <= 0 || !Number.isFinite(renderedWidth) || renderedWidth <= 0) return;
   // Never apply the height of a one-column layout or feed a transient native
   // width back into setContentSize while the initial window is being mapped.
@@ -280,30 +392,58 @@ ipcMain.on("win:fit-content", (event, height, renderedWidth) => {
 });
 
 // The settings overlay needs more height than the 46px compact strip.
-ipcMain.on("win:settings-height", (_e, open) => {
-  if (!win || win.isDestroyed() || !settings.compact) return;
+ipcMain.on("win:settings-height", (event, open) => {
+  const instance = instanceOfSender(event.sender);
+  const win = instance?.win;
+  if (!win || win.isDestroyed() || !instance.server.compact) return;
   win.setContentSize(COMPACT_SIZE.width, open ? 480 : COMPACT_SIZE.height);
 });
 
-ipcMain.handle("get-state", () => ({ settings, payload: lastPayload }));
-ipcMain.handle("set-setting", (_e, key, value) => { setSetting(key, value); return settings; });
-ipcMain.handle("refresh", async () => { await pollOnce(); return lastPayload; });
+ipcMain.handle("get-state", (event) => {
+  const instance = instanceOfSender(event.sender);
+  if (!instance) return { settings: null, servers: serverList(), payload: null };
+  return { settings: instance.server, servers: serverList(), payload: instance.lastPayload };
+});
+ipcMain.handle("set-setting", (event, key, value) => {
+  const instance = instanceOfSender(event.sender);
+  if (!instance) return null;
+  setSetting(instance, key, value);
+  return instance.server;
+});
+ipcMain.handle("refresh", async (event) => {
+  const instance = instanceOfSender(event.sender);
+  if (!instance) return null;
+  await pollOnce(instance);
+  return instance.lastPayload;
+});
+ipcMain.handle("server:add", (event) => {
+  instanceOfSender(event.sender); // sender must be a widget window
+  const server = addServer();
+  return serverList();
+});
+ipcMain.handle("server:remove", (event) => {
+  const instance = instanceOfSender(event.sender);
+  if (!instance) return serverList();
+  removeServer(instance.server.id);
+  return serverList();
+});
 
-// Single instance: a second launch focuses the existing widget instead.
+// Single instance: a second launch focuses the existing widgets instead.
 if (!app.requestSingleInstanceLock()) app.quit();
-else app.on("second-instance", showWindow);
+else app.on("second-instance", showAllWindows);
 
 app.whenReady().then(() => {
-  createWindow();
-  startPolling();
+  for (const server of servers) startServer(server);
   try {
     tray = new Tray(trayIcon("idle"));
-    tray.on("click", showWindow);
+    tray.on("click", showAllWindows);
     rebuildTray();
   } catch {
     tray = null; // no system tray in this environment; window controls still work
   }
-  app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) for (const server of servers) startServer(server);
+  });
 });
 
 app.on("window-all-closed", () => app.quit());
